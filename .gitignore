@@ -1,0 +1,26 @@
+# === ESP-IDF build ===
+build/
+sdkconfig.old
+sdkconfig.defaults
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.bin
+*.elf
+*.map
+*.log
+
+# === VSCode ===
+.vscode/
+*.code-workspace
+
+# === Espressif tools ===
+*.pyc
+__pycache__/
+*.pkl
+.project
+.cproject
+
+# === OS specific ===
+.DS_Store
+Thumbs.db
