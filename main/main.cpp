@@ -24,7 +24,6 @@ static int8_t map_value(int value) {
 
 void my_cdc_rx_handler(const uint8_t* data, size_t len)
 {
-    
     // Cria um buffer temporário, garante espaço para o terminador
     char temp[65];
     size_t copy_len = (len < 64) ? len : 64;
@@ -35,9 +34,9 @@ void my_cdc_rx_handler(const uint8_t* data, size_t len)
     cdc_send_text(temp);
     cdc_send_text("\r\n");
 
-     ESP_LOGI("COM", "deu boa");
+    ESP_LOGI("COM", "%s", temp);
 
-     ble_send_steering(temp,  copy_len);
+    ble_send_pedals(temp,  copy_len);
 }
 
 
@@ -119,26 +118,4 @@ extern "C" void app_main(void)
     cdc_set_rx_callback(my_cdc_rx_handler);
 
     ble_init(steering_cb, pedals_cb);
-
-
-    // uint16_t buttons = 0;
-    // int8_t x = 0, y = 0, z = 0;
-    // int dir = 0;
-
-    // while (1) {
-    //     if (tud_mounted()) {
-    //         buttons = (buttons + 1) & 0xFFFF;
-    //         if (dir == 0) { x = 50; y = 0; z = 0; }
-    //         else if (dir == 1) { x = 0; y = 50; z = 0; }
-    //         else if (dir == 2) { x = 0; y = 0; z = 50; }
-    //         else if (dir == 3) { x = -50; y = 0; z = 0; }
-    //         else if (dir == 4) { x = 0; y = -50; z = 0; }
-    //         else { x = 0; y = 0; z = -50; }
-    //         dir = (dir + 1) % 6;
-
-    //         gamepad_send_report(buttons, x, y, z);
-    //     }
-
-    //     vTaskDelay(pdMS_TO_TICKS(500));
-    // }
 }

@@ -18,18 +18,19 @@ static uint16_t conn_handles[MAX_CONN] = {0};
 static ble_rx_callback_t steering_rx_cb = NULL;
 static ble_rx_callback_t pedals_rx_cb   = NULL;
 
+static uint16_t steering_handle;
+static uint16_t pedals_handle;
+
 // UUIDs
+
+// SERVICE
+static const ble_uuid16_t service_uuid = BLE_UUID16_INIT(0xAB10);
+
 // STEERING 128-bit (substitua se quiser usar 16-bit)
-static const ble_uuid128_t steering_uuid = BLE_UUID128_INIT(
-    0x56, 0x34, 0x12, 0x34,
-    0xef, 0xcd,
-    0x34, 0xab,
-    0xab, 0xcd,
-    0x12, 0x34, 0xab, 0xcd, 0xab, 0x12
-);
+static const ble_uuid16_t steering_uuid = BLE_UUID16_INIT(0xAB11);
 
 // PEDALS 16-bit
-static const ble_uuid16_t pedals_uuid = BLE_UUID16_INIT(0x1002);
+static const ble_uuid16_t pedals_uuid = BLE_UUID16_INIT(0xAB12);
 
 // Buffers
 static char steering_buf[50] = {0};
@@ -67,17 +68,19 @@ static int char_pedals_cb(uint16_t conn_handle, uint16_t attr_handle,
 static const struct ble_gatt_svc_def gatt_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = &steering_uuid.u,
+        .uuid = &service_uuid.u,
         .characteristics = (struct ble_gatt_chr_def[]) {
             {
                 .uuid = &steering_uuid.u,
                 .access_cb = char_steering_cb,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &steering_handle,
             },
             {
                 .uuid = &pedals_uuid.u,
                 .access_cb = char_pedals_cb,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &pedals_handle,
             },
             {0}
         }
@@ -100,6 +103,31 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
                         break;
                     }
                 }
+
+                        // Verifica se ainda há slots livres e reinicia advertising
+                bool has_free_slot = false;
+                for (int i = 0; i < MAX_CONN; i++) {
+                    if (conn_handles[i] == 0) {
+                        has_free_slot = true;
+                        break;
+                    }
+                }
+                if (has_free_slot) {
+                    struct ble_gap_adv_params adv_params = {
+                        .conn_mode = BLE_GAP_CONN_MODE_UND,
+                        .disc_mode = BLE_GAP_DISC_MODE_GEN,
+                    };
+                    struct ble_hs_adv_fields fields = {
+                        .flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP,
+                        .name = (uint8_t *)"ESP32-S3-NimBLE",
+                        .name_len = strlen("ESP32-S3-NimBLE"),
+                        .name_is_complete = 1,
+                    };
+                    ble_gap_adv_set_fields(&fields);
+                    ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
+                                    &adv_params, gap_event_handler, NULL);
+                }
+
             }
             break;
 
@@ -190,6 +218,9 @@ void ble_init(ble_rx_callback_t steering_cb_in, ble_rx_callback_t pedals_cb_in)
     nimble_port_freertos_init(host_task);
 
     ESP_LOGI(TAG, "NimBLE inicializado com sucesso");
+
+    ESP_LOGI(TAG, "Handle da característica steering: %d", steering_handle);
+    ESP_LOGI(TAG, "Handle da característica pedals: %d", pedals_handle);
 }
 
 // Envio STEERING
@@ -201,7 +232,7 @@ int ble_send_steering(const char *data, size_t len)
     int rc = 0;
     for (int i = 0; i < MAX_CONN; i++) {
         if (conn_handles[i]) {
-            rc = ble_gattc_notify_custom(conn_handles[i], 0x0001, om);
+            rc = ble_gattc_notify_custom(conn_handles[i], steering_handle, om);
         }
     }
     return rc;
@@ -216,7 +247,7 @@ int ble_send_pedals(const char *data, size_t len)
     int rc = 0;
     for (int i = 0; i < MAX_CONN; i++) {
         if (conn_handles[i]) {
-            rc = ble_gattc_notify_custom(conn_handles[i], 0x0002, om);
+            rc = ble_gattc_notify_custom(conn_handles[i], pedals_handle, om);
         }
     }
     return rc;
