@@ -19,6 +19,8 @@ int ble_send_steering(const char *data, size_t len);
 // Envia dados via notify para PEDALS
 int ble_send_pedals(const char *data, size_t len);
 
+int ble_send_pedal_vibration(uint8_t id, uint8_t value);
+
 #ifdef __cplusplus
 }
 #endif

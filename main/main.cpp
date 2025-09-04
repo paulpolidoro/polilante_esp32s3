@@ -3,6 +3,11 @@
 #include "usb/cdc.h"
 #include "esp_log.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/task.h"
@@ -13,14 +18,20 @@ extern "C" {
 
 static const char *TAG = "MAIN";
 
-// Mapeia valor de 0–100 para -127–127
+#define MIN_HALL 1860
+#define MAX_HALL 3000
+
+
 static int8_t map_value(int value) {
-    if (value < 0) value = 0;
-    if (value > 100) value = 100;
-    // regra de 3: (value / 100.0) * 254 - 127
-    int mapped = ((value * 254) / 100) - 127;
+    // Garante que o valor esteja dentro do intervalo
+    if (value < MIN_HALL) value = MIN_HALL;
+    if (value > MAX_HALL) value = MAX_HALL;
+
+    // Regra de 3: (value - MIN) * 254 / (MAX - MIN) - 127
+    int mapped = ((value - MIN_HALL) * 254) / (MAX_HALL - MIN_HALL) - 127;
     return (int8_t)mapped;
 }
+
 
 void my_cdc_rx_handler(const uint8_t* data, size_t len)
 {
@@ -75,39 +86,51 @@ static void steering_cb(const char *data, size_t len) {
 }
 
 static void pedals_cb(const char *data, size_t len) {
-     ESP_LOGI(TAG, "PEDALS callback: %.*s", (int)len, data);
+    if (len % 3 != 0) {
+        ESP_LOGW(TAG, "Pacote inválido: tamanho não múltiplo de 3");
+        return;
+    }
 
-    char buf[128];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, data, len);
-    buf[len] = '\0';
+    for (size_t i = 0; i < len; i += 3) {
+        uint8_t id = data[i];
+        uint16_t raw = ((uint8_t)data[i + 1] << 8) | (uint8_t)data[i + 2];
+        int8_t mapped = map_value(raw);  // Mapeia para -127 a 127, por exemplo
 
-    // Divide pelos ";"
-    char *token = strtok(buf, ";");
-    while (token != NULL) {
-        char key[8];
-        int value;
-
-        if (sscanf(token, "%3[^:]:%d", key, &value) == 2) {
-            ESP_LOGI(TAG, "Key=%s Value=%d", key, value);
-
-            if (strcmp(key, "acc") == 0) {
-                int8_t mapped = map_value(value);
+        switch (id) {
+            case 0x01:  // ACC
                 gamepad_set_x(mapped);
-                ESP_LOGI(TAG, "Mapped acc=%d -> %d", value, mapped);
-            } 
-            else if (strcmp(key, "brk") == 0) {
-                int8_t mapped = map_value(value);
+                //ESP_LOGI(TAG, "ACC: %d", raw);
+                break;
+            case 0x02:  // BRK
                 gamepad_set_y(mapped);
-                ESP_LOGI(TAG, "Mapped brk=%d -> %d", value, mapped);
-            } 
-            else if (strcmp(key, "tht") == 0) {
-                int8_t mapped = map_value(value);
+               // ESP_LOGI(TAG, "BRK: %d", raw);
+                break;
+            case 0x03:  // THT
                 gamepad_set_z(mapped);
-                ESP_LOGI(TAG, "Mapped tht=%d -> %d", value, mapped);
-            }
+               // ESP_LOGI(TAG, "THT: %d", raw);
+                break;
+            default:
+                ESP_LOGW(TAG, "ID desconhecido: 0x%02X", id);
+                break;
         }
-        token = strtok(NULL, ";");
+    }
+}
+
+// Task dedicada para envio BLE SOMENTE TESTE
+void ble_vibration_task(void *pvParameters) {
+    srand((unsigned int)time(NULL));
+
+    vTaskDelay(pdMS_TO_TICKS(10000)); 
+
+    while (true) {
+        for (uint8_t motor_id = 0x01; motor_id <= 0x03; motor_id++) {
+            uint8_t vibration = rand() % 101;
+            int result = ble_send_pedal_vibration(motor_id, vibration);
+
+            vTaskDelay(pdMS_TO_TICKS(100));  // Pequeno delay entre motores
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Delay entre ciclos
     }
 }
 
@@ -118,4 +141,9 @@ extern "C" void app_main(void)
     cdc_set_rx_callback(my_cdc_rx_handler);
 
     ble_init(steering_cb, pedals_cb);
+
+
+    xTaskCreate(ble_vibration_task, "BLE_Vibration_Task", 4096, NULL, 5, NULL);
+
+
 }

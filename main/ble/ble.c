@@ -21,6 +21,8 @@ static ble_rx_callback_t pedals_rx_cb   = NULL;
 static uint16_t steering_handle;
 static uint16_t pedals_handle;
 
+static bool pedals_notify_enabled[MAX_CONN] = { false };
+
 // UUIDs
 
 // SERVICE
@@ -44,7 +46,6 @@ static int char_steering_cb(uint16_t conn_handle, uint16_t attr_handle,
     if (len < sizeof(steering_buf)) {
         ble_hs_mbuf_to_flat(ctxt->om, steering_buf, len, NULL);
         steering_buf[len] = '\0';
-        ESP_LOGI(TAG, "STEERING received: %s", steering_buf);
         if (steering_rx_cb) steering_rx_cb(steering_buf, len);
     }
     return 0;
@@ -58,7 +59,6 @@ static int char_pedals_cb(uint16_t conn_handle, uint16_t attr_handle,
     if (len < sizeof(pedals_buf)) {
         ble_hs_mbuf_to_flat(ctxt->om, pedals_buf, len, NULL);
         pedals_buf[len] = '\0';
-        ESP_LOGI(TAG, "PEDALS received: %s", pedals_buf);
         if (pedals_rx_cb) pedals_rx_cb(pedals_buf, len);
     }
     return 0;
@@ -160,6 +160,22 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
             }
             break;
 
+        case BLE_GAP_EVENT_SUBSCRIBE:
+            ESP_LOGI(TAG, "Cliente %d alterou inscrição: attr=%d, notify=%d",
+                    event->subscribe.conn_handle,
+                    event->subscribe.attr_handle,
+                    event->subscribe.cur_notify);
+
+            for (int i = 0; i < MAX_CONN; i++) {
+                if (conn_handles[i] == event->subscribe.conn_handle) {
+                    pedals_notify_enabled[i] = (event->subscribe.attr_handle == pedals_handle) &&
+                                            event->subscribe.cur_notify;
+                    break;
+                }
+            }
+            break;
+
+
         default:
             break;
     }
@@ -252,3 +268,30 @@ int ble_send_pedals(const char *data, size_t len)
     }
     return rc;
 }
+
+int ble_send_pedal_vibration(uint8_t id, uint8_t value)
+{
+    uint8_t payload[2] = { id, value };
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(payload, sizeof(payload));
+    if (!om) return -1;
+
+    int rc = 0;
+    bool sent = false;
+
+    for (int i = 0; i < MAX_CONN; i++) {
+        if (conn_handles[i] && pedals_notify_enabled[i]) {
+            rc = ble_gattc_notify_custom(conn_handles[i], pedals_handle, om);
+            sent = true;
+        }
+    }
+
+    if (!sent) {
+        os_mbuf_free_chain(om);  // Libera o buffer se ninguém estiver ouvindo
+        rc = -2;
+        ESP_LOGW(TAG, "Sem clientes para enviar vibração");
+    }
+
+    return rc;
+
+}
+
